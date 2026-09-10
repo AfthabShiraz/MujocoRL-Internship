@@ -1,0 +1,4 @@
+[submodule "leapXelaMjLab"]
+	path = leapXelaMjLab
+	url = https://github.com/AfthabShiraz/leapXelaMjLab.git
+	branch = condim6-tipover

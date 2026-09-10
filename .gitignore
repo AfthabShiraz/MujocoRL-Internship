@@ -1,0 +1,29 @@
+# graphify's generated knowledge graph — rebuilt with `graphify update .`
+graphify-out/
+
+# Python / uv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets and local machine config
+.env
+.env.*
+*.pem
+*.key
+.claude/settings.local.json
+
+# Training output: checkpoints, tensorboard, wandb cache, rendered rollouts
+logs/
+wandb/
+*.pt
+*.mp4
+
+# MuJoCo appends a warning log on every run
+MUJOCO_LOG.TXT
+
+# OS junk
+.DS_Store
