@@ -1,0 +1,5 @@
+# Downloaded third-party source material for the research dossier.
+# 19 arXiv papers as text + four cloned reference repos bundled to single files
+# + MuJoCo docs pages. Not committed: it is other people's copyrighted text and
+# code, and it is fully regenerable — see research/tools/ and research/README.md.
+research/sources/
