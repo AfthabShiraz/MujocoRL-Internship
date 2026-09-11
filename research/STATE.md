@@ -10,6 +10,25 @@ Deterministic eval artifacts: `leapXelaMjLab/eval/*.json` and `*_eval.txt`.
 
 ---
 
+## 0. Superseded, 2026-09-11 — read this first
+
+Everything below predates two same-day findings in `leapXelaMjLab/TRAINING_NOTES.md`. Three
+corrections:
+
+- **The equilibrium account (§5–§6) was right.** Its own pre-registered, falsifiable
+  prediction — a worth-of-precision reward change should push total closure *outside* the
+  77.6–81.4% band — was confirmed: run 33 reached 91.1% total closure. See
+  "## 33. `warm-inv-pin-ent1e3` — the first policy that reaches goals".
+- **"0/32 everywhere" and `research/NEXT_EXPERIMENTS.md`'s 5.94–6.39° table (§4–§5) are
+  measurement artifacts, not a property of the policy.** `eval_policy.py` scored the
+  post-drift-kick goal instead of the goal each step was judged by, so every reference-env
+  success count in this file is censored and needs re-scoring. See "## Interlude — the eval
+  measurement bug, found 2026-09-11".
+- **Reward-side edits must warm-start from a post-breakthrough checkpoint or they die at
+  iteration 300–500**, before they test anything they were built to test — why runs 20, 22, 23
+  and 31 (§5, §7) are not evidence about terminal precision. See "## The iteration-300
+  breakthrough, and why cold-start reward edits keep missing it (2026-09-11)".
+
 ## 1. The stack is NOT what the analyses assumed
 
 | Analyses assumed | Reality |
