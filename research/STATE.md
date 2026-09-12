@@ -27,13 +27,19 @@ that had already learned to tip the cube.
 | median best error, goal pinned | — | **0.73°** |
 | HELD @ 0.1 rad, goal pinned | ~0% | **73.1%** |
 
+*Pinned-figure note, 2026-09-12: `TRAINING_NOTES.md`'s pinned-eval table reports "goals/episode"
+3.16 / 5.61 separately — that is `threshold_entries_per_episode` (re-entries into a goal that
+never moves), not distinct goals achieved; a pinned episode achieves one goal and holds it.
+Corrected there 2026-09-12. Drift-on figures (e.g. 1.14 above) are unaffected.*
+
 ~9.3 successes per drop, against the MuJoCo Playground paper's ten hardware trials (median 3.5,
 mean 7.1, best 27 consecutive rotations before failure). Sim against hardware, a deterministic
 mean-action rollout, and a 700-step cap that truncates the upper tail — a scale comparison, not a
 parity claim. But the 0/32 that opened this investigation is closed, and it was closed **without
 touching the hand**: same model, same pads, same contact model, same palm angle.
 
-**What is now open is the residual**, not the stall. See §7.
+**What is now open is goal acquisition — most of it undirected search, some of it a genuine hard
+subpopulation** (§4, corrected twice, 2026-09-12) and not the stall. See §7.
 
 ## 1. The stack is NOT what the analyses assumed
 
@@ -83,13 +89,69 @@ censored by construction. Run 14 is really 2/128, not 0/32. Fixed.
 - Cube angular speed at best error 1.5–2.5 rad/s — sweeping past the goal, not arriving.
 - Longer training did nothing: run 14 flat over its final 1250 iterations, run 8 over 3300.
 
-**Now (run 37, converged):** 30 of 139 reference-env episodes never reach 5.7°. **Only 2 of those
-30 drop the cube** — the rest survive the full episode and park at a median best of 18.1°, split
-**14.5° tip against 8.4° spin**. Ten of the 30 get inside 12° and stop.
+**Now (run 37, converged), first pass.**
 
-The signature has not changed character. It has been **confined**: the same tip-dominated residual
-that described every episode now describes a fifth of them, and within those it is still 1.7× the
-spin component.
+> 30 of 139 reference-env episodes never reach 5.7°. **Only 2 of those 30 drop the cube** — the
+> rest survive the full episode and park at a median best of 18.1°, split **14.5° tip against
+> 8.4° spin**. Ten of the 30 get inside 12° and stop.
+>
+> The signature has not changed character. It has been **confined**: the same tip-dominated
+> residual that described every episode now describes a fifth of them, and within those it is
+> still 1.7× the spin component.
+
+**Corrected 2026-09-12.** The reading above held for a few hours and is superseded by the pooled
+re-analysis below. Kept as a blockquote because the counts are still correct — only the diagnosis
+built on top of them was wrong.
+
+**Now, corrected — pooled 713 episodes across six deterministic evals**
+(`eval/mainline_it8000_n128{,_s8,_s9}_det.json`, `eval/mainline_it11625_n128{,_s8,_s9}_det.json`,
+plus the pinned `eval/mainline_it11625_trainenv_n128_det.json`): the residual is not tip-over and
+not a drift artifact. It is **undirected search**, for most episodes, and a genuine hard
+subpopulation for the rest — see the second correction below. Full derivation in
+`research/NEXT_EXPERIMENTS.md` ("The open problem"); headline numbers:
+
+- **Not tip-over.** Normalised, failures close spin at 88.4% and tip at 87.1% — spin is
+  marginally *worse*. The absolute 14.5°/8.4° split above is the goal sampler's own tip/spin
+  demand ratio (1.85×: `Rx(a)·Ry(b)` at `commands.py:167-185` gives 2 tip DOF against 1 spin
+  DOF), not a policy asymmetry. **Confirmed at 1000 steps, 2026-09-12:** spin 95.7%, tip 95.9%
+  over all episodes; within failures, spin 90.3%, tip 90.9%.
+- **Corrected again, 2026-09-12: not a flat hazard — there IS a hard subpopulation.** Kept as a
+  blockquote because the first correction pass measured the hazard on a biased proxy; the
+  conclusion, not just the number, was wrong.
+
+  > Not a parked mode. Hazard of first acquisition is flat from step 100 to 700 (22–30% per 100
+  > steps, pooled); a constant-hazard fit alone predicts 20.1% never acquiring by step 700 against
+  > 16.1% observed. No declining-hazard subpopulation exists to unstick.
+
+  Cause: `best_step` in the eval JSON is argmin-of-error, not the acquisition time — biased late,
+  worse for multi-entry episodes. `eval_policy.py` now records `first_entry_step` instead. With
+  that field, over the full 1000-step episode the hazard **declines monotonically and collapses**
+  (7.6%, 36.1%, 40.6%, 21.7%, 18.1%, 15.6%, 16.9%, then 3.7%, 3.8%, 2.0% per 100-step window,
+  `model_8000` pooled). Never-acquired at 1000 steps is **14.3%**, not the ~7% the flat-hazard fit
+  predicted. ~13–14% of episodes are a genuine hard subpopulation. Full derivation in
+  `research/NEXT_EXPERIMENTS.md` (Finding 3). **Consequence: the per-goal timeout/fail-and-resample
+  cell is reinstated**, not falsified — see `research/NEXT_EXPERIMENTS.md`.
+- **Not a drift artifact.** Reference-env failure rate (16.1%, drift on) matches the pinned-env
+  rate (16.9%): a drift episode that never succeeds is never kicked (`commands.py:195-207`), so it
+  is dynamically identical to a pinned one.
+- **Not harder goals.** Failure rate *falls* as demanded rotation grows (18.6% at 0–45° vs
+  10.2–14.6% at 105–181°); acquisition time is uncorrelated with what is demanded (r = −0.13 to
+  +0.01). **Confirmed at 1000 steps, 2026-09-12: unchanged.**
+- **It is undirected search — for most episodes.** Median time to first goal, corrected 2026-09-12
+  to the unbiased `first_entry_step` metric, is **203 steps (10.2 s)** (was 231 under the biased
+  proxy) for a median 127° rotation the hand's own measured 1.33 rad/s could cover in ~34 steps.
+  Path efficiency (geodesic / distance travelled) has median **0.172** (was 0.145) — the cube
+  travels ~6× the geodesic — and 68% of acquisitions happen above 0.5 rad/s (fly-bys). Failed
+  episodes orbit rather than diverge: best 17.2° at step 490, final 27.1°, still turning at
+  1.02 rad/s at that best moment.
+- **Measurement caveat, resolved 2026-09-12.** The eval's `--num-steps` default is 700 against a
+  1000-step environment episode (`env_cfg.py:549`, `eval_policy.py:79`); 708 of the 713 pooled
+  episodes in the first pass were cut by that cap. The prerequisite re-score at 1000 steps has
+  since run (`research/NEXT_EXPERIMENTS.md`, "Consequence for the queue") and is what surfaced the
+  hard subpopulation above.
+- **New, 2026-09-12: the eval is also not reproducible run-to-run at fixed seed** — success
+  fraction moves 2.5 points between identical invocations while acquisition time moves ~1.4%. See
+  §8 and `research/NEXT_EXPERIMENTS.md`, Standing rules.
 
 ## 5. Seven single-variable nulls — do not re-propose these
 
@@ -146,26 +208,61 @@ behaviour, so the pinned number is a **capability measurement, not a task score*
 
 ## 7. What is open
 
-- **THE open problem: the tip-over residual, at a fifth of episodes.** 28 of 30 failures are
-  parked episodes that survive to time-out at ~18°, tip-dominated. More iterations of the current
-  recipe will not move it (run 37, measured at three seeds). The candidates are
-  state-distribution interventions: a tip-axis waypoint, a per-goal fail-and-resample timeout, or
-  a real goal curriculum. See `research/NEXT_EXPERIMENTS.md`.
-- **The goal curriculum is untested, not dead.** The claim in the previous revision of this file
-  and in `verdicts/SYNTHESIS.md` §3a — that the gate can never fire because `promote_at=1.0`
-  exceeds the measured rate — is **wrong on the mechanism**. Verified 2026-09-12: the curriculum
-  is not wired into the reference task at all (`env_cfg.py:465` deletes the term under the
-  `baseline` preset, and `:613` registers the reference task as `baseline`), difficulty is pinned
-  at 1.0 from step one, and goals are drawn absolute over the full ±π span. Separately,
-  `success_count` counts *steps under threshold*, not distinct arrivals, so a `promote_at` gate
-  against it saturates immediately once the goal is pinned. Wiring it up means fixing the counter
-  first.
+- **Corrected 2026-09-12: the open problem is undirected goal acquisition — and, corrected again
+  the same day, a genuine hard subpopulation.**
+
+  > THE open problem: the tip-over residual, at a fifth of episodes. 28 of 30 failures are
+  > parked episodes that survive to time-out at ~18°, tip-dominated. More iterations of the
+  > current recipe will not move it (run 37, measured at three seeds). The candidates are
+  > state-distribution interventions: a tip-axis waypoint, a per-goal fail-and-resample timeout,
+  > or a real goal curriculum.
+
+  A pooled 713-episode re-analysis (§4) showed the residual was not tip-specific and not a drift
+  artifact. It first read as not parked either — a flat acquisition hazard, no stuck subpopulation
+  — but that reading used a biased time-to-acquisition proxy. Re-scored at the full 1000 steps
+  with the corrected metric, the hazard **declines and collapses**: never-acquired falls only to
+  14.3%, not the ~7% a flat hazard predicts, and ~13–14% of episodes are a genuine hard
+  subpopulation that a memoryless actor falls into and does not leave (§4). **The per-goal
+  timeout/fail-and-resample cell is reinstated**, not falsified. The tip-axis-waypoint and
+  curriculum cells stay falsified/inverted — they rested on the tip-over and harder-goals
+  findings, which the 1000-step data confirms rather than overturns. **The metric that matters
+  from here is acquisition rate and path efficiency, not success fraction** (see §8: success
+  fraction is ~10× noisier run-to-run than acquisition time). Top queued cell, now running rather
+  than queued: give the actor `cube_ang_vel` (currently critic-only, `observations.py:94`) as a
+  capability probe, warm-started from `model_8000` — run `actorvel-probe`, started 2026-09-12
+  12:49. Full derivation and the control run (`model_11625`, +3,625 iterations, moves nothing) in
+  `research/NEXT_EXPERIMENTS.md`.
+- **The goal curriculum is untested, not dead — and its original motivation is gone.** The claim
+  in the previous revision of this file and in `verdicts/SYNTHESIS.md` §3a — that the gate can
+  never fire because `promote_at=1.0` exceeds the measured rate — is **wrong on the mechanism**.
+  Verified 2026-09-12: the curriculum is not wired into the reference task at all (`env_cfg.py:465`
+  deletes the term under the `baseline` preset, and `:613` registers the reference task as
+  `baseline`), difficulty is pinned at 1.0 from step one, and goals are drawn absolute over the
+  full ±π span. Separately, `success_count` counts *steps under threshold*, not distinct arrivals,
+  so a `promote_at` gate against it saturates immediately once the goal is pinned. Wiring it up
+  means fixing the counter first. **Corrected 2026-09-12, same day:** it was also going to be
+  wired up to fix hard goals arriving before the policy could handle them — the re-analysis above
+  shows failure rate *falls* as goals get harder, so that reason no longer holds. The mechanism
+  fix above is still correct; only the reason to bother with it is gone. **Reconfirmed 2026-09-12,
+  second pass:** the 1000-step data leaves this unchanged — harder goals still fail less.
 - **A second seed at `--action-l2 1e-4`** (that cell moved 26.3 → 22.4°, just past the floor; its
   1e-3 sibling moved 3.5° the other way — one seed cannot tell those apart).
-- **The bare-hand control** — playground's plain LEAP in this stack, like-for-like. Deferred
-  2026-09-12, and more interesting now that the gap closed with the hand untouched.
+- **The bare-hand control** — playground's plain LEAP in this stack, like-for-like. **Model is
+  now built** (`assets/leap_plain/`, vendored from mujoco_playground + mujoco_menagerie, compiles
+  at 16 DOF / 56 geoms) and it is a near-perfect control: joint axes and positions identical
+  16/16 against LeapXELA, 746 g vs 749 g, 66 geoms vs 56 (the +10 are the pads). **Not queued —
+  pending a free GPU and one decision**: run it under THIS project's recipe (isolates the hand)
+  rather than playground's (would confound hand and reward). Full write-up, including the
+  measurement showing the reward difference does *not* explain the non-aiming, is in
+  `research/NEXT_EXPERIMENTS.md`, "PENDING DECISION — the bare-hand control".
 - **Whether the kick should be a resample rather than a 160° drift** for the deployed task, and
   whether that is still the same benchmark. Decide before quoting pinned numbers anywhere.
+- **Nobody has measured whether ANY policy aims at this task.** Alignment (mean of
+  `omega . r_hat`, the fraction of the cube's rotation pointed at the goal) is a diagnostic built
+  2026-09-12; no published figure exists for it, playground's included. Our ~0.02-0.09 is
+  therefore **uncalibrated** — it may be what in-hand reorientation normally looks like. Until
+  the bare-hand control runs, quote the shortfall only against what this hand demonstrably does
+  (`rotate_z` directs 125 deg/s on the same hand and pads), never against the reference.
 - **Not started:** the flex/touch half of task 1.
 
 ## 8. Do not trust training-time metrics
@@ -177,3 +274,9 @@ Run 37 showed the same failure from the opposite direction: training `orientatio
 at 12–18° from iteration 9000 while the deterministic score was still climbing 50.7% → 83.9%
 across 4499 → 8000. **A flat training curve does not mean a converged policy.** Convergence is
 called on `scripts/eval_policy.py` (mean-action rollout), at three seeds, or not at all.
+
+**Added 2026-09-12: the eval itself is not reproducible run-to-run at fixed seed** — success
+fraction can move ~2.5 points between identical invocations of `eval_policy.py` while time to
+first goal moves ~1.4% (~3 steps). See `research/NEXT_EXPERIMENTS.md`, Standing rules, for the
+full replicate table. Decide on acquisition time and path efficiency, not on success fraction, for
+exactly this reason — not just because acquisition rate is the more meaningful metric (§4, §7).
