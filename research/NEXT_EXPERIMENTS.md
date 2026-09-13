@@ -7,7 +7,9 @@ residual. **Revised again 2026-09-12, later the same day, after a pooled re-anal
 artifacts** — that residual diagnosis was itself wrong; see "The open problem" below. **Revised a
 third time 2026-09-12, after the 1000-step prerequisite ran** — the second revision's own Finding
 3 (flat hazard, no stuck subpopulation) was itself wrong, for a measurement reason recorded in
-Finding 3 below; cell 4 is reinstated; cell 9 is running, not queued. Read the revision markers;
+Finding 3 below; cell 4 is reinstated; cell 9 is running, not queued. **Revised a fourth time 2026-09-13** — Findings 8-10 add a calibration-free aiming statistic, record
+`angvel-align` and the actor-velocity probe as nulls on it, and identify the instantaneous success
+criterion as the cause of the fly-by; cell 11 is the new top-ranked cell. Read the revision markers;
 roughly half of the original file is now answered rather than pending.
 
 Read in this order before touching anything:
@@ -347,7 +349,69 @@ The pre-registered decision criterion for cell 9 is restated against this measur
 
 ---
 
-## Experiments — all unrun except cell 9, ordered by information per unit cost
+## Findings 8–10 — measured 2026-09-13, from the per-episode arrays
+
+A third pass over `eval/*_det.json`, using the `episodes` arrays rather than the summary blocks.
+Full derivation and method notes in `research/FINDING.md`; the conclusion built on them is in
+`research/CONCLUSION.md`. These **corroborate** Findings 5–6 (undirected search) with a sharper
+statistic and add one hard negative.
+
+**8 — near goals are HARDER than far goals, and only on LeapXELA.** Reach rate on far goals
+(start error ≥120°) minus near goals (<90°), all segments, bootstrap 20k:
+
+| policy | gap | 95% CI |
+|---|---:|---|
+| mainline it8000 | +15.0 | [+4.1, +26.1] |
+| mainline it11625 | +21.3 | [+10.6, +32.5] |
+| `actorvel-probe` it9999 | +17.7 | [+7.2, +28.6] |
+| `angvel-align` it9999 | +19.0 | [+7.9, +30.3] |
+| **XELA pooled (4 checkpoints)** | **+18.3** | **[+12.8, +23.9]** |
+| **BARE `bare-inv-pin` it7999** | **−4.2** | [−10.4, +2.6] |
+
+A controller that aims finds near goals *easier*. LeapXELA finds them ~18 points harder; the bare
+hand does not. This is the signature of sweeping SO(3) on a roughly fixed trajectory — a far goal
+probably lies somewhere on the sweep, a near goal is passed early and needs a full cycle to return.
+**Unlike the alignment diagnostic this is a within-policy comparison and needs no external
+calibration.** Corroboration (weaker, selection-biased because it conditions on acquiring): XELA
+median time-to-acquire *falls* 255 → 184 steps as the goal gets further, while BARE *rises*
+81 → 165.
+
+**9 — `angvel-align` was null on the aiming metric, not just on reach.** Scored with Finding 8's
+statistic the directional-reward run sits at **+19.0 [+7.9, +30.3]**, indistinguishable from the
+baseline's +21.3; reach fell 86.9% → 81.6%. Together with `actorvel-probe` (+17.7) and +3,625
+extra iterations (+21.3), **four reward/observation interventions have now failed to move the
+aiming gap.** It tracks the hand.
+
+**10 — arrival is a fly-by, on BOTH hands, and the cause is the success criterion.** At the moment
+of closest approach the cube is still turning at **0.85 rad/s** (XELA) / **0.88** (BARE); only
+**3.1% / 3.4%** of episodes are actually stopped there (<0.2 rad/s). The cube turns ~9.5 full
+revolutions per 50 s episode — about **five turns per goal acquired**.
+
+`success_bonus` is `(err < success_threshold).float()` (`rewards.py`) — a pure instantaneous
+indicator with **no velocity or dwell condition**. A drive-by at 0.85 rad/s banks exactly the same
+bonus as a deliberate arrival, so sweeping is the cheaper way to collect it.
+
+The capability is present and measured: same checkpoint, goal pinned, |ω| at best falls
+0.85 → 0.35 rad/s and HELD @ 0.1 rad for ten consecutive steps goes ~0% → **78%**. The policy
+holds when holding pays.
+
+**Method caution for anyone extending this.** Filtering to full-length episodes inflates the
+bare-hand advantage from the correct **+7.2** points to +12.2 — BARE drops 2.6× more often, so 38%
+of its segments are short against XELA's 16%, and short segments reach less. Finding 8 is reported
+unfiltered and is *stronger* that way (+18.3 against +14.3 filtered), but **never filter by episode
+length when comparing the two hands.**
+
+**A mechanism tested and rejected.** `robots/leap_xela.py:139` reasons that lateral splay is "the
+component this task has never been able to steer" — horizontal-axis rotation — and the goal sampler
+demands 1.85× more tip than spin, which predicts near-goal failures should be tip-dominated. They
+are not: splitting near goals at the median tip fraction gives **+8.7 [−2.4, +19.8]**, if anything
+favouring tip. The deficit is **axis-agnostic** undirected search. This weakens the splay
+hypothesis without killing it — wider splay could still restore directedness by enlarging the
+reachable set of rotation directions generally, rather than by rescuing one axis.
+
+---
+
+## Experiments — ordered by information per unit cost (cell 9 answered 2026-09-13)
 
 Single-variable against the converged checkpoint (`night-ext/model_11625`, or `model_8000` if you
 want the cheapest matched start), warm-started, goal pinned, `entropy_coef` 1e-3 unless the cell
@@ -366,12 +430,71 @@ table below.
 
 | # | Change | Build | Prediction if right |
 |---|---|---|---|
-| 9 | **Actor `cube_ang_vel` probe** — top-ranked cell. **Running, not queued** — see "Cell 9, in full" immediately below the table. | Running (started 2026-09-12 12:49, iters 8000→10000) | See the pre-registered decision criterion below |
+| **11** | **Hold-to-advance: require N consecutive in-threshold steps before the goal kick fires.** Top-ranked cell, see "Cell 11, in full" below. Changes only the goal-advance trigger in `commands.py:196`; leaves `success_bonus` per-step, so holding pays ~N× a fly-by. | 0.25 d | Fly-by fraction collapses from 96.9%; HELD climbs toward the pinned 78%; raw reach falls because drive-bys stop counting |
+| ~~9~~ | **Actor `cube_ang_vel` probe** — **ANSWERED 2026-09-13: null.** `model_9999`, three seeds. Reach 85.7% against the baseline's 86.9%, inside the ±3% seed spread, and the Finding 8 aiming gap is **unmoved at +17.7 [+7.2, +28.6]**. Velocity in the actor observation is not the missing ingredient. | done | — |
 | 4 | **Per-goal timeout, fail+resample** at 600 steps of `steps_since_last_success` — mark the *goal* failed and sample a new one, preserving in-hand state; not terminate (terminating resets everything and fires the −100). **Reinstated 2026-09-12:** Finding 3's correction shows a genuine ~13–14% hard subpopulation exists to convert; the falsification in the previous revision rested on a biased hazard estimate, now corrected. | 0.5 d | Never-acquired fraction falls below its ~13–14% measured floor; more goals/episode without shorter episodes |
 | 10 | **`gamma` 0.99 → 0.995 or 0.998.** No code change, warm-starts cleanly. Value horizon at 0.99 is 100 steps (5 s) against an 11.6 s median acquisition (Finding 5). Ranked second, not first, because the literature ties 0.998 to LSTM training specifically (DeXtreme `analysis/07` line 66, Dactyl `analysis/05` line 74) while every MLP reference — including mujoco_playground's own `LeapCubeReorient` — uses 0.99 (`analysis/01` line 223, `analysis/02` line 208, `analysis/06` lines 151–153, `analysis/11` line 322). With no value normalisation in `rl_cfg.py` the return scale rises ~5×; keep run 32's std>4 abort rule armed. | 0.25 d | Median time-to-goal and path efficiency move the same direction as cell 9 |
 | 5 | **`termination` −100 → 0 or −10** (`env_cfg.py:336`). DexReMoE dropped its fall penalty because it suppressed exploration. **Weaker still:** only 2 of 115 pooled failures end in a drop (was 2 of 30 on the single seed this cell was originally ranked against), so fall-avoidance is even less obviously what is holding acquisition back. | 0.25 d | Drops rise; acquisition rate or path efficiency improve |
 | 6 | **`action_rate` −0.001 → 0** (`env_cfg.py:345`, hardcoded, **no flag**). Dominant logged cost at −0.44/s, 4× `hand_pose`, never varied. Runs 27–28 tested action *magnitude* (`action_l2`), a different quantity. Ranked low: DeXtreme uses *more* rate pressure, not less — a diagnostic, not a production default. | 0.25 d | A cost-side cell that moves acquisition rate would show the cost side is still live at convergence |
 | 8 | **Skill hierarchy** over frozen RotateX/Y/Z + residual (SYNTHESIS §4 cell 8). **Not falsified — strengthened:** Findings 5 and 6 show the failure mode is undirected tumbling, and a planner that chooses a rotation axis is the literature's answer to exactly that, not to a tip-specific residual. Most structurally credible route in the literature, most expensive. `rotate_y` is not a finished primitive (run 17, 0.575 rad/s, not converged), so the honest minimum is a planner over the two working axes (z at 2.19, x at 2.22 rad/s). Hold until the cheap cells return. | 7.5–14 d | Median time-to-goal and path efficiency improve sharply; a planner should produce directed motion, not fly-bys |
+
+---
+
+### Cell 11, in full — hold-to-advance (2026-09-13)
+
+**The defect.** `success_bonus` is `(err < success_threshold).float()` — instantaneous, no velocity
+or dwell condition. The goal-advance trigger in `commands.py:196` reads the same bare condition.
+So a cube passing through the threshold at 0.85 rad/s banks the same reward as one that arrives and
+settles, and passing through is far cheaper than arriving. Finding 10 measures the consequence:
+96.9% of arrivals are fly-bys.
+
+**The change — one condition, one file.** Require N consecutive in-threshold steps before the kick
+fires. **Leave `success_bonus` alone.** The two are separate code paths that happen to read the
+same condition, and leaving the bonus per-step is what creates the incentive:
+
+- fly-by → 1 step in the zone → 1 bonus → goal stays put, come back round;
+- arrive and hold → N steps in the zone → N bonuses **plus** the inverse kernel pinned at its
+  maximum of 10 the whole time → *then* the goal moves.
+
+Holding becomes worth roughly N× a fly-by. `consecutive_success` in `commands.py` already counts
+steps under threshold, so the counting machinery exists.
+
+**Why N = 10, and why it is a velocity limit in disguise.** To stay inside 0.1 rad for ten steps at
+20 Hz — half a second — average |ω| must be under about **0.2 rad/s**. The policy currently passes
+through at 0.85 rad/s, which carries it 24° in that window. So "hold for 10 steps" *is* "slow to
+0.2 rad/s", expressed as one integer rather than a second threshold — and 0.2 rad/s is already the
+`hold_ang_speed` that `eval_policy.py` uses for HELD. **This trains the metric we already measure.**
+HELD reads ~0% under drift and 78% pinned precisely because nothing in the reward currently asks
+for it.
+
+**Literature.** DeXtreme reports the identical pathology on its own task — *"the cube may shoot past
+the target"* — and added an N-frame hold, ablating N = 0/5/10/20 to 38.4/35.3/33.3/27.3 consecutive
+successes; N=10 was their balance point and N=20 degraded sharply. But theirs is **evaluation-only**:
+they state the policy was *"not trained explicitly to hold"* and that a real hold needs *"zero
+velocities at the target"* and *"changing the reward function."* Chen et al. Visual Dexterity did
+change it — their **training** success went from orientation-only to orientation **plus** small
+object motion (`ω < 0.5`, `v < 0.04`) and small finger motion, explicitly because the object
+*"oscillates around the target orientation"* — and they note prior controllers merely count
+*"passes through a target pose"* and were never trained to stop, which they *"experimentally found
+harder to learn."* Full extraction in `research/lit/A-success-criterion-and-flyby.md`.
+
+**Practical notes.**
+- **Warm-start from `model_8000` or `model_11625`.** Cold-start reward edits are 0 for 3 on this
+  project (runs 20, 22, 23, 31).
+- **Consider ramping N** 1 → 10 rather than switching straight to 10, for the same reason.
+- **Expect raw reach to fall.** You stop counting drive-bys; that is the point. Judge on HELD,
+  SETTLED and goals-per-drop.
+
+**Falsifiable prediction.** Fly-by fraction (|ω| at best > 0.2 rad/s) drops well below 96.9% and
+HELD climbs toward the pinned 78%. If HELD stays near zero while reach merely falls, the criterion
+is not the lever and Finding 10's mechanism is wrong.
+
+**Second question this cell answers for free.** Score it with the Finding 8 near/far gap. Under the
+current rule sweeping is near-optimal, so there is little payoff for aiming — the hand sets the
+*cost* of aiming, the criterion sets the *worth*. If the gap collapses toward zero, the aiming
+deficit was reward-structural and cell 3 / the splay attribution matters much less. If the gap
+stays at +18 while HELD rises, aiming is genuinely the hand and the bare-hand attribution work is
+the clearly-indicated next step. Either outcome is informative.
 
 ---
 
@@ -613,6 +736,7 @@ fraction — so it is comparable to cells 9, 4/10 and `leap-limits`.
 | **Cold-start reward edits** | 0 for 3 at surviving the iteration-300 tip-over step (runs 20, 22, 23, 31). Warm-start from a post-breakthrough checkpoint or the cell tests nothing. |
 | **Relaxing the success threshold to 0.4** | Run 31. Regressed to 72° vs 26°. Also moves the drift kick to 22.9°, so it is not single-variable. |
 | `_long_tail_tolerance` as the orientation kernel | Gradient **vanishes at zero error** — a bell, not a well. At `margin=π` its peak marginal reward sits at 34.6°, where the policy already stalled. At `margin=0.4` it supplies 1/100th of the current global pull at 130°. Explains run 23 numerically: at 30° it contributed 0.019/deg against the linear term's 0.028/deg. Superseded anyway — the inverse kernel is the well this was reaching for. |
+| **Swapping the goal drift for resample-on-success, as a fix for the fly-by** | Considered and **rejected on re-derivation 2026-09-13.** Both rules leave the goal stationary while the policy approaches and both remove it the instant the policy arrives, so neither pays for holding — the drift-versus-resample distinction is not the lever. What makes the pinned eval different is that the goal *never* leaves, so parking on it pays `1/(0+0.1)` every step forever. The lever is the success criterion (cell 11), not the goal rule. Resample-at-90° may still be worth doing to match the playground **paper** (whose code drifts — see `research/lit/B-goal-advancement.md`), but as a benchmark-definition decision, not as a fix. |
 | Pure progress shaping `d_t − d_{t+1}` | Potential-based: `∂R/∂Δ = k`, so marginal value per degree is **also constant** — reproduces the same equilibrium. Telescopes to `k(d₀ − d_T)`, so path shape cancels; with no per-goal timeout, parking for 40 s earns the same as arriving in 10 s. |
 | Restoring the 20× success weight | Run 20. Harmful (error 0.74 → 1.10, action std → 5.95). |
 | More physics sweeps | Seven single-variable nulls: condim 6, friction+priority, action L2, cube size ×2, rolling probe, observation noise. Several had their mechanism demonstrably fire. Palm angle is closed (1.92 = 90°+20° is hardware-correct). The residual survived a 95.9%-closure policy, so it is not a grip problem: 2 of 30 failures drop the cube at run 37's single seed (700 steps), 2 of 115 pooled across six evals (700 steps), and 9 of 342 pooled at the full 1000-step episode. |
